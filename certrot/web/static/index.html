@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>证书轮换模拟台</title>
+<style>
+  :root {
+    --bg:#0f141b; --panel:#171e28; --panel2:#1d2632; --border:#2a3543;
+    --txt:#d6deea; --muted:#8593a5; --accent:#4da3ff; --ok:#37c98e;
+    --warn:#f0b452; --bad:#ff6b6b; --v1:#f0896b; --v2:#4dd0a7; --exp:#c77dff;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt);
+    font:13px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",Menlo,monospace; }
+  header { display:flex; align-items:center; gap:16px; padding:10px 18px;
+    background:var(--panel); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:20; }
+  header h1 { font-size:15px; margin:0; }
+  .phase { padding:2px 10px; border-radius:10px; font-size:12px; border:1px solid var(--border); }
+  .phase.running { color:var(--accent); border-color:var(--accent); }
+  .phase.rotated { color:var(--warn); border-color:var(--warn); }
+  .phase.expired { color:var(--bad); border-color:var(--bad); }
+  .spacer { flex:1; }
+  button { background:var(--panel2); color:var(--txt); border:1px solid var(--border);
+    border-radius:6px; padding:6px 14px; cursor:pointer; font-family:inherit; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:#1d4e89; border-color:var(--accent); }
+  button.danger { background:#7a2e35; border-color:var(--bad); }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  main { padding:14px 18px 40px; max-width:1500px; margin:0 auto; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:14px; }
+  .kpi { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px 12px; }
+  .kpi .n { font-size:22px; font-weight:600; }
+  .kpi .l { color:var(--muted); font-size:11px; margin-top:2px; }
+  .grid2 { display:grid; grid-template-columns:2fr 1fr; gap:12px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-bottom:14px; }
+  .card h2 { font-size:13px; margin:0 0 10px; color:var(--muted); font-weight:600; letter-spacing:.5px; }
+  canvas { width:100%; height:260px; display:block; }
+  .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; margin-top:6px; }
+  .legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th,td { padding:6px 8px; text-align:left; border-bottom:1px solid var(--border); white-space:nowrap; }
+  th { color:var(--muted); font-weight:600; position:sticky; top:47px; background:var(--panel); cursor:pointer; }
+  tr:hover td { background:var(--panel2); }
+  tr.selected td { background:#22303f; }
+  .tag { padding:1px 7px; border-radius:9px; font-size:11px; display:inline-block; }
+  .tag.v1 { background:rgba(240,137,107,.18); color:var(--v1); }
+  .tag.v2 { background:rgba(77,208,167,.18); color:var(--v2); }
+  .tag.never { background:rgba(255,107,107,.18); color:var(--bad); }
+  .tag.auto { background:rgba(55,201,142,.16); color:var(--ok); }
+  .tag.expired { background:rgba(199,125,255,.18); color:var(--exp); }
+  .tag.unknown { background:rgba(133,147,165,.18); color:var(--muted); }
+  .tag.t0 { color:#ffd166; } .tag.t1 { color:#7fc4ff; } .tag.t2 { color:var(--muted); }
+  .tabs { display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
+  .tabs button.active { background:#22384f; border-color:var(--accent); color:var(--accent); }
+  .filters { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+  select,input { background:var(--panel2); color:var(--txt); border:1px solid var(--border);
+    border-radius:6px; padding:5px 8px; font-family:inherit; font-size:12px; }
+  .scroll { max-height:560px; overflow:auto; }
+  .reason { color:var(--muted); font-size:11px; white-space:normal; min-width:320px; }
+  .layer { color:var(--warn); }
+  .drawer { position:fixed; right:0; top:0; bottom:0; width:460px; background:var(--panel);
+    border-left:1px solid var(--border); padding:16px; overflow:auto; z-index:30;
+    transform:translateX(100%); transition:transform .18s; }
+  .drawer.open { transform:none; }
+  .drawer h3 { margin:0 0 12px; }
+  .kv { display:grid; grid-template-columns:110px 1fr; gap:4px 10px; font-size:12px; margin-bottom:12px; }
+  .kv .k { color:var(--muted); }
+  .ev { border-left:2px solid var(--border); padding:4px 0 4px 10px; margin-bottom:6px; font-size:11px; }
+  .ev b { color:var(--accent); }
+  .plan-batch { border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:8px; }
+  .plan-batch.done { opacity:.55; }
+  .muted { color:var(--muted); }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); }
+  code { background:var(--panel2); padding:1px 5px; border-radius:4px; }
+  .backdrop { position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:25; display:none; }
+  .backdrop.open { display:block; }
+  .verdict-consistent { color:var(--ok); } .verdict-missed,.verdict-over-bound { color:var(--bad); }
+  .verdict-false-alarm { color:var(--warn); } .verdict-restarted { color:#7fc4ff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>证书轮换模拟台</h1>
+  <span id="phase" class="phase">init</span>
+  <span id="clock" class="muted"></span>
+  <span class="spacer"></span>
+  <label class="muted"><input type="checkbox" id="autoRefresh" checked> 1s 自动刷新</label>
+  <button id="btnRotate" class="primary">执行轮换 (写入 v2 Secret)</button>
+  <button id="btnNextBatch">执行下一重启批次</button>
+  <button id="btnReport">生成预判比对报告</button>
+</header>
+
+<main>
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid2">
+    <div class="card">
+      <h2>全舰队证书使用比例随时间变化(进程实际加载)</h2>
+      <canvas id="chart"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--v2)"></i>已加载新证书 v2 占比</span>
+        <span><i style="background:var(--v1)"></i>仍加载旧证书 v1 占比</span>
+        <span><i style="background:var(--exp)"></i>持有已到期证书(进程视角)</span>
+        <span><i style="background:#7fc4ff"></i>磁盘已见 v2 占比(独立核验)</span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>轮换与到期</h2>
+      <div id="rotInfo" class="kv"></div>
+      <h2 style="margin-top:14px">静态扫描结论</h2>
+      <div id="scanInfo" class="kv"></div>
+      <h2 style="margin-top:14px">建议重叠期</h2>
+      <div id="planInfo" class="kv"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="tabs" id="tabs">
+      <button data-tab="workloads" class="active">工作负载与容器</button>
+      <button data-tab="never">到期前还没换上的清单</button>
+      <button data-tab="plan">重启计划批次</button>
+      <button data-tab="report">预判 vs 实测比对</button>
+      <button data-tab="logs">节点同步日志</button>
+    </div>
+    <div id="tabBody"></div>
+  </div>
+</main>
+
+<div class="backdrop" id="backdrop"></div>
+<div class="drawer" id="drawer"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let state = null, report = null, tab = 'workloads', selectedId = null;
+let sortKey = 'id', sortDir = 1;
+const filters = { text:'', mount:'', read:'', status:'' };
+const MOUNT_LABEL = { volume:'整卷投射(..data 原子切换)', subpath:'subPath 单文件挂载(不更新)', env:'环境变量注入(启动一次)' };
+const READ_LABEL = { 'read-once':'启动只读一次', poll:'定时重读', 'watch-file':'监听文件路径',
+  'watch-dir':'监听目录', 'watch-dir-filtered':'监听目录+文件名过滤', 'poll+watch-dir':'轮询+目录监听组合' };
+const TIER_LABEL = {0:'核心',1:'中间层',2:'一般'};
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  return r.json();
+}
+async function refresh() {
+  state = await api('/api/state');
+  render();
+}
+function fmtElapsed(sec) {
+  if (sec == null) return '—';
+  if (sec < 60) return sec.toFixed(1) + 's';
+  return Math.floor(sec/60) + 'm ' + Math.round(sec%60) + 's';
+}
+function pct(a,b) { return b ? (100*a/b).toFixed(1) + '%' : '0%'; }
+function esc(s) { return String(s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+function render() {
+  renderHeader(); renderKPIs(); renderChart(); renderSide(); renderTab(); renderDrawer();
+}
+
+function renderHeader() {
+  const ph = $('#phase');
+  ph.textContent = state.phase;
+  ph.className = 'phase ' + state.phase;
+  const t0 = new Date(state.startedAt);
+  const now = new Date(state.now);
+  $('#clock').textContent = '已运行 ' + fmtElapsed((now - t0)/1000);
+  $('#btnRotate').disabled = !!state.rotation;
+}
+
+function renderKPIs() {
+  const cs = state.containers;
+  const last = state.series[state.series.length-1] || {loadedV1:0,loadedV2:0,loadedExpired:0,diskV1:0,diskV2:0};
+  const expiredLoaded = cs.filter(c => c.status === 'expired').length;
+  const neverPred = state.scan.neverUpdates;
+  const notSwitched = state.rotation ? cs.filter(c => c.loadedVersion !== 'v2').length : cs.length;
+  const cards = [
+    ['容器总数', cs.length, ''],
+    ['已加载新证书 v2', last.loadedV2, pct(last.loadedV2, cs.length)],
+    ['仍加载旧证书 v1', last.loadedV1, pct(last.loadedV1, cs.length)],
+    ['进程视角已到期', expiredLoaded, ''],
+    ['磁盘已见 v2(独立核验)', last.diskV2, pct(last.diskV2, cs.length)],
+    ['预判永不更新', neverPred, '静态扫描'],
+    ['轮换后仍未换上', state.rotation ? notSwitched : '—', ''],
+  ];
+  $('#kpis').innerHTML = cards.map(([l,n,s]) =>
+    `<div class="kpi"><div class="n">${n}</div><div class="l">${l} ${s?`<span class="muted">${s}</span>`:''}</div></div>`).join('');
+}
+
+function renderChart() {
+  const cv = $('#chart'), dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = 260;
+  cv.width = w*dpr; cv.height = h*dpr;
+  const ctx = cv.getContext('2d'); ctx.scale(dpr,dpr);
+  ctx.clearRect(0,0,w,h);
+  const s = state.series;
+  if (s.length < 1) return;
+  const padL=46, padR=14, padT=14, padB=24;
+  const x0=padL, x1=w-padR, y0=padT, y1=h-padB;
+  const tStart = new Date(state.startedAt).getTime();
+  const tEnd = Math.max(new Date(s[s.length-1].time).getTime(), tStart + 1000);
+  const X = t => x0 + (new Date(t).getTime()-tStart)/((tEnd-tStart)||1)*(x1-x0);
+  const Y = v => y1 - v*(y1-y0);
+  // grid
+  ctx.strokeStyle = '#2a3543'; ctx.fillStyle='#8593a5'; ctx.lineWidth=1; ctx.font='11px monospace';
+  for (let i=0;i<=5;i++) {
+    const y = y1 - i/5*(y1-y0);
+    ctx.beginPath(); ctx.moveTo(x0,y); ctx.lineTo(x1,y); ctx.stroke();
+    ctx.fillText(i*20+'%', 6, y+4);
+  }
+  const total = s[0].total || 1;
+  const area = (key, color) => {
+    ctx.beginPath(); ctx.moveTo(X(s[0].time), y1);
+    s.forEach(p => ctx.lineTo(X(p.time), Y(p[key]/total)));
+    ctx.lineTo(X(s[s.length-1].time), y1); ctx.closePath();
+    ctx.fillStyle = color.replace('1)', '.18)'); ctx.fill();
+    ctx.beginPath();
+    s.forEach((p,i) => i ? ctx.lineTo(X(p.time), Y(p[key]/total)) : ctx.moveTo(X(p.time), Y(p[key]/total)));
+    ctx.strokeStyle = color; ctx.lineWidth=1.6; ctx.stroke();
+  };
+  area('loadedV2', 'rgba(77,208,167,1)');
+  area('loadedV1', 'rgba(240,137,107,1)');
+  // disk v2 line
+  ctx.beginPath(); ctx.setLineDash([5,4]);
+  s.forEach((p,i) => i ? ctx.lineTo(X(p.time), Y(p.diskV2/total)) : ctx.moveTo(X(p.time), Y(p.diskV2/total)));
+  ctx.strokeStyle='#7fc4ff'; ctx.lineWidth=1.4; ctx.stroke(); ctx.setLineDash([]);
+  // expired line
+  ctx.beginPath();
+  s.forEach((p,i) => i ? ctx.lineTo(X(p.time), Y(p.loadedExpired/total)) : ctx.moveTo(X(p.time), Y(p.loadedExpired/total)));
+  ctx.strokeStyle='#c77dff'; ctx.lineWidth=1.4; ctx.stroke();
+  // markers
+  const mark = (t, label, color) => {
+    if (!t) return;
+    const x = X(t);
+    if (x < x0 || x > x1) return;
+    ctx.strokeStyle=color; ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(x,y0); ctx.lineTo(x,y1); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle=color; ctx.fillText(label, x+4, y0+11);
+  };
+  if (state.rotation) {
+    mark(state.rotation.at, '轮换', '#f0b452');
+    mark(state.rotation.oldNotAfter, '旧证到期', '#ff6b6b');
+  }
+  // x labels
+  ctx.fillStyle='#8593a5';
+  [0, 0.5, 1].forEach(q => {
+    const t = new Date(tStart + q*(tEnd-tStart));
+    ctx.fillText(fmtElapsed((t-tStart)/1000), x0+q*(x1-x0)-14, y1+16);
+  });
+}
+
+function renderSide() {
+  const r = state.rotation;
+  $('#rotInfo').innerHTML = r ? `
+    <div class="k">轮换时刻</div><div>T+${fmtElapsed(r.elapsedSeconds)}</div>
+    <div class="k">旧证书到期</div><div>${new Date(r.oldNotAfter).toLocaleTimeString()} <span class="bad">(T+${fmtElapsed((new Date(r.oldNotAfter)-new Date(state.startedAt))/1000)})</span></div>
+    <div class="k">新证书有效期至</div><div>${new Date(r.newNotAfter).toLocaleDateString()}</div>`
+    : `<div class="k">状态</div><div class="muted">尚未轮换;旧证书 T+${fmtElapsed(state.config.oldCertTTLSec)} 到期</div>`;
+  const sc = state.scan;
+  $('#scanInfo').innerHTML = `
+    <div class="k">可自动换证</div><div class="ok">${sc.willAutoUpdate} 个</div>
+    <div class="k">永不更新</div><div class="bad">${sc.neverUpdates} 个</div>
+    <div class="k">自动换证上界 P50/P95/Max</div><div>${sc.boundsP50P95MaxSec.map(x=>fmtElapsed(x)).join(' / ')}</div>
+    <div class="k">故障分层</div><div class="reason">${Object.entries(sc.byLayer).map(([k,v])=>esc(k)+' × '+v).join('<br>')}</div>`;
+  const p = state.plan;
+  $('#planInfo').innerHTML = `
+    <div class="k">最小重叠期</div><div class="warn">${fmtElapsed(p.minOverlapSec)}</div>
+    <div class="k">建议重叠期</div><div class="ok">${fmtElapsed(p.recommendedOverlapSec)}</div>
+    <div class="k">需重启容器</div><div>${p.restartCount} 个 / ${p.batches.length} 批</div>`;
+}
+
+// ---- tabs ----
+$('#tabs').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  tab = b.dataset.tab;
+  document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('active', x===b));
+  renderTab();
+});
+
+function renderTab() {
+  if (tab === 'workloads') renderWorkloads();
+  else if (tab === 'never') renderNever();
+  else if (tab === 'plan') renderPlan();
+  else if (tab === 'report') renderReportTab();
+  else renderLogs();
+}
+
+function tagForVersion(v) {
+  if (v === 'v1') return '<span class="tag v1">v1 旧</span>';
+  if (v === 'v2') return '<span class="tag v2">v2 新</span>';
+  return '<span class="tag unknown">未知</span>';
+}
+
+function renderWorkloads() {
+  const body = $('#tabBody');
+  const opts = (vals, cur) => '<option value="">全部</option>' + vals.map(v =>
+    `<option value="${v}" ${v===cur?'selected':''}>${esc(MOUNT_LABEL[v]||READ_LABEL[v]||v)}</option>`).join('');
+  body.innerHTML = `
+    <div class="filters">
+      <input id="fText" placeholder="搜索 ID/工作负载/节点" value="${esc(filters.text)}">
+      <select id="fMount">${opts(['volume','subpath','env'], filters.mount)}</select>
+      <select id="fRead">${opts(Object.keys(READ_LABEL), filters.read)}</select>
+      <select id="fStatus">
+        <option value="">全部状态</option>
+        <option value="v2" ${filters.status==='v2'?'selected':''}>已换 v2</option>
+        <option value="v1" ${filters.status==='v1'?'selected':''}>仍是 v1</option>
+        <option value="expired" ${filters.status==='expired'?'selected':''}>已到期</option>
+      </select>
+      <span class="muted" style="align-self:center">点击行查看容器详情与事件流</span>
+    </div>
+    <div class="scroll"><table id="wlTable">
+      <thead><tr>
+        ${th('id','容器ID')}${th('workload','工作负载')}${th('namespace','命名空间')}${th('node','节点')}${th('tier','等级')}
+        <th>挂载方式</th><th>读取方式</th><th>静态预判</th><th>进程加载</th><th>磁盘核验</th>
+        <th>重读次数</th><th>换证耗时</th><th>状态</th><th></th>
+      </tr></thead><tbody></tbody></table></div>`;
+  $('#fText').oninput = e => { filters.text = e.target.value; renderWorkloads(); };
+  $('#fMount').onchange = e => { filters.mount = e.target.value; renderWorkloads(); };
+  $('#fRead').onchange = e => { filters.read = e.target.value; renderWorkloads(); };
+  $('#fStatus').onchange = e => { filters.status = e.target.value; renderWorkloads(); };
+  const rows = state.containers.filter(c => {
+    if (filters.mount && c.mount !== filters.mount) return false;
+    if (filters.read && c.read !== filters.read) return false;
+    if (filters.status === 'v2' && c.loadedVersion !== 'v2') return false;
+    if (filters.status === 'v1' && c.loadedVersion !== 'v1') return false;
+    if (filters.status === 'expired' && c.status !== 'expired') return false;
+    if (filters.text) {
+      const q = filters.text.toLowerCase();
+      if (!(c.id+c.workload+c.node).toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+  rows.sort((a,b) => {
+    const va = a[sortKey] ?? '', vb = b[sortKey] ?? '';
+    return (va < vb ? -1 : va > vb ? 1 : 0) * sortDir;
+  });
+  const tbody = body.querySelector('tbody');
+  tbody.innerHTML = rows.map(c => {
+    const p = c.prediction || {};
+    const sw = c.switchTime && state.rotation
+      ? fmtElapsed((new Date(c.switchTime)-new Date(state.rotation.at))/1000) : '—';
+    return `<tr data-id="${c.id}" class="${c.id===selectedId?'selected':''}">
+      <td>${c.id}</td><td>${esc(c.workload)}</td><td>${c.namespace}</td><td>${c.node}</td>
+      <td><span class="tag t${c.tier}">${TIER_LABEL[c.tier]}</span></td>
+      <td title="${esc(MOUNT_LABEL[c.mount]||'')}">${esc(c.mount)}</td>
+      <td title="${esc(READ_LABEL[c.read]||'')}">${esc(c.read)}</td>
+      <td>${p.willUpdate ? '<span class="tag auto">自动</span>' : '<span class="tag never">永不</span>'}
+        ${p.layer?`<div class="layer" style="font-size:11px">${esc(p.layer)}</div>`:''}</td>
+      <td>${tagForVersion(c.loadedVersion)}</td>
+      <td>${tagForVersion(c.diskVersion)}</td>
+      <td>${c.reloadCount}</td><td>${sw}</td>
+      <td>${c.status==='expired'?'<span class="tag expired">已到期</span>':c.status}</td>
+      <td><button class="mini" data-restart="${c.id}">重启</button></td>
+    </tr>`;
+  }).join('');
+  tbody.onclick = e => {
+    const rb = e.target.closest('[data-restart]');
+    if (rb) { api('/api/restart', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({id: rb.dataset.restart})}); return; }
+    const tr = e.target.closest('tr[data-id]');
+    if (tr) { selectedId = tr.dataset.id; openDrawer(); renderDrawer(); }
+  };
+}
+function th(key, label) {
+  return `<th data-sort="${key}">${label} ${sortKey===key?(sortDir>0?'▲':'▼'):''}</th>`;
+}
+document.addEventListener('click', e => {
+  const h = e.target.closest('th[data-sort]'); if (!h) return;
+  const k = h.dataset.sort;
+  if (sortKey === k) sortDir *= -1; else { sortKey = k; sortDir = 1; }
+  if (tab === 'workloads') renderWorkloads();
+});
+
+function renderNever() {
+  const list = state.scan.neverList || [];
+  // live cross-check: which of the predicted-never still hold v1 right now
+  const byId = Object.fromEntries(state.containers.map(c => [c.id, c]));
+  $('#tabBody').innerHTML = `
+    <div class="muted" style="margin-bottom:8px">静态扫描判定永不更新 ${list.length} 个;
+      当前仍持旧证书 <span class="bad">${list.filter(e => byId[e.containerId]?.loadedVersion!=='v2').length}</span> 个
+      ${state.rotation?'(轮换后实时核验)':'(轮换前预判)'}</div>
+    <div class="scroll"><table><thead><tr>
+      <th>容器</th><th>工作负载</th><th>命名空间</th><th>节点</th><th>等级</th><th>挂载</th><th>读取</th>
+      <th>故障层</th><th>当前实况</th><th>原因</th></tr></thead><tbody>
+      ${list.map(e => {
+        const c = byId[e.containerId];
+        const live = c ? tagForVersion(c.loadedVersion) : '';
+        return `<tr data-id="${e.containerId}" style="cursor:pointer">
+          <td>${e.containerId}</td><td>${esc(e.workload)}</td><td>${e.namespace}</td><td>${e.node}</td>
+          <td><span class="tag t${e.tier}">${TIER_LABEL[e.tier]}</span></td>
+          <td>${e.mount}</td><td>${e.read}</td><td class="layer">${esc(e.layer)}</td><td>${live}</td>
+          <td class="reason">${esc(e.reason)}</td></tr>`;
+      }).join('')}
+    </tbody></table></div>`;
+  $('#tabBody tbody').onclick = e => {
+    const tr = e.target.closest('tr[data-id]'); if (!tr) return;
+    selectedId = tr.dataset.id; openDrawer(); renderDrawer();
+  };
+}
+
+function renderPlan() {
+  const byId = Object.fromEntries(state.containers.map(c => [c.id, c]));
+  $('#tabBody').innerHTML = state.plan.batches.map(b => {
+    const done = b.containers.every(c => byId[c.id]?.restartCount > 0);
+    return `<div class="plan-batch ${done?'done':''}">
+      <b>批次 ${b.index} · ${esc(b.label)} · ${b.containers.length} 个容器
+        ${done?'<span class="ok">已完成</span>':''}</b>
+      <div class="muted" style="margin:4px 0">${b.containers.map(c =>
+        `${c.id}(${c.node},${c.mount}/${c.read}) ${byId[c.id]?.loadedVersion==='v2'?'<span class="ok">✓v2</span>':'<span class="bad">✗v1</span>'}`).join(' · ')}</div>
+      ${done?'':`<button data-batch="${b.index}">执行本批重启</button>`}
+    </div>`;
+  }).join('') + `<div class="muted" style="margin-top:10px">${state.plan.rationale.map(r=>'• '+esc(r)).join('<br>')}</div>`;
+  $('#tabBody').onclick = async e => {
+    const b = e.target.closest('[data-batch]'); if (!b) return;
+    await api('/api/restart-batch', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({index: +b.dataset.batch})});
+    refresh();
+  };
+}
+
+let reportSortKey = 'verdict';
+function renderReportTab() {
+  if (!report) {
+    $('#tabBody').innerHTML = '<div class="muted">点击右上角「生成预判比对报告」(建议在自动换证容器全部稳定后)</div>';
+    return;
+  }
+  const rows = [...report.rows].sort((a,b) => {
+    const order = {missed:0,'over-bound':1,'false-alarm':2,restarted:3,consistent:4};
+    return (order[a.verdict]-order[b.verdict]) || a.containerId.localeCompare(b.containerId);
+  });
+  $('#tabBody').innerHTML = `
+    <div style="margin-bottom:10px">
+      <span class="ok">一致 ${report.consistent}</span> ·
+      <span class="bad">漏判(预判会自动更新、实际没有) ${report.missed}</span> ·
+      <span class="warn">误判 ${report.falseAlarm}</span> ·
+      <span class="bad">超出延迟上界 ${report.overBound}</span> ·
+      <span style="color:#7fc4ff">计划重启治愈 ${report.restartHealed}</span><br>
+      <span class="muted">预判永不更新 ${report.predictedNeverCnt} 个,实测仍持旧证书 ${report.actualNeverCnt} 个 —
+        两数相等且漏判为 0,说明没有漏掉任何永不更新的容器</span>
+    </div>
+    <div class="scroll"><table><thead><tr>
+      <th>容器</th><th>挂载/读取</th><th>预判</th><th>实测</th><th>换证耗时</th><th>延迟上界</th><th>结论</th>
+    </tr></thead><tbody>
+      ${rows.map(r => `<tr data-id="${r.containerId}" style="cursor:pointer">
+        <td>${r.containerId}<div class="muted">${esc(r.workload)} · ${r.node}</div></td>
+        <td>${r.mount}<br><span class="muted">${r.read}</span></td>
+        <td>${r.predictedUpdate?'<span class="tag auto">自动</span>':'<span class="tag never">永不</span>'}
+          ${r.predictedLayer?`<div class="layer" style="font-size:11px">${esc(r.predictedLayer)}</div>`:''}</td>
+        <td>${r.actualUpdated?'<span class="tag v2">v2</span>':'<span class="tag v1">v1</span>'}
+          ${r.restarted?'<div class="muted">经重启</div>':''}</td>
+        <td>${r.switchElapsedSeconds!=null?fmtElapsed(r.switchElapsedSeconds):'—'}</td>
+        <td>${r.boundSeconds?fmtElapsed(r.boundSeconds):'—'}</td>
+        <td class="verdict-${r.verdict}">${({consistent:'一致',missed:'漏判!','false-alarm':'误判','over-bound':'超上界',restarted:'重启后换上'})[r.verdict]}</td>
+      </tr>`).join('')}
+    </tbody></table></div>`;
+  $('#tabBody tbody').onclick = e => {
+    const tr = e.target.closest('tr[data-id]'); if (!tr) return;
+    selectedId = tr.dataset.id; openDrawer(); renderDrawer();
+  };
+}
+
+function renderLogs() {
+  $('#tabBody').innerHTML = Object.entries(state.nodeLogs).map(([node, logs]) => `
+    <div class="card" style="margin-bottom:8px"><h2>${node} · 同步周期 ${fmtElapsed(state.config.nodeIntervalsSec[node])}</h2>
+    <div class="scroll" style="max-height:220px">
+      ${logs.slice(-40).map(l => `<div><span class="muted">${new Date(l.time).toLocaleTimeString()}</span>
+        <b>[${l.action}]</b> ${esc(l.secret)} rv${l.rv} ${esc(l.detail)}</div>`).join('')}
+    </div></div>`).join('');
+}
+
+// ---- drawer ----
+function openDrawer() { $('#drawer').classList.add('open'); $('#backdrop').classList.add('open'); }
+$('#backdrop').onclick = () => { $('#drawer').classList.remove('open'); $('#backdrop').classList.remove('open'); selectedId=null; };
+function renderDrawer() {
+  if (!selectedId) return;
+  const c = state.containers.find(x => x.id === selectedId);
+  if (!c) return;
+  const p = c.prediction || {};
+  $('#drawer').innerHTML = `
+    <h3>${c.id} <button onclick="$('#backdrop').click()" style="float:right">关闭</button></h3>
+    <div class="kv">
+      <div class="k">工作负载</div><div>${esc(c.workload)} (${c.kind})</div>
+      <div class="k">命名空间/节点</div><div>${c.namespace} / ${c.node}</div>
+      <div class="k">Secret</div><div><code>${c.secretName}/${c.certKey}</code></div>
+      <div class="k">挂载方式</div><div>${esc(MOUNT_LABEL[c.mount]||c.mount)}</div>
+      <div class="k">读取方式</div><div>${esc(READ_LABEL[c.read]||c.read)}</div>
+      <div class="k">轮询间隔</div><div>${c.pollInterval?Math.round(c.pollInterval/1e9)+'s':'—'}</div>
+      <div class="k">卷目录</div><div style="word-break:break-all"><code>${esc(c.volumeDir||'—')}</code></div>
+      <div class="k">证书路径</div><div style="word-break:break-all"><code>${esc(c.certPath||c.envPath||'—')}</code></div>
+      <div class="k">静态预判</div><div>${p.willUpdate?'<span class="ok">可自动更新</span>':'<span class="bad">永不更新</span>'}
+        ${p.layer?' · '+esc(p.layer):''}</div>
+      <div class="k">预判依据</div><div class="reason">${esc(p.reason||'')}</div>
+      <div class="k">进程加载</div><div>${tagForVersion(c.loadedVersion)} serial ${esc((c.loadedSerial||'').slice(0,24))}</div>
+      <div class="k">磁盘核验</div><div>${tagForVersion(c.diskVersion)} serial ${esc((c.diskSerial||'').slice(0,24))}</div>
+      <div class="k">加载证书到期</div><div>${c.loadedNotAfter?new Date(c.loadedNotAfter).toLocaleString():'—'}</div>
+      <div class="k">重读/重启</div><div>${c.reloadCount} 次 / ${c.restartCount} 次</div>
+    </div>
+    <button data-restart="${c.id}" class="danger">重启该容器</button>
+    <h3 style="margin-top:16px">事件流</h3>
+    ${c.events.slice().reverse().map(e => `<div class="ev">
+      <b>${new Date(e.time).toLocaleTimeString()}</b> [${e.type}] ${e.version?e.version+' ':''}
+      <span class="muted">${esc(e.serial.slice(0,16))}</span><br>${esc(e.detail)}</div>`).join('') || '<div class="muted">无事件</div>'}`;
+  $('#drawer [data-restart]').onclick = () => api('/api/restart', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({id: c.id})});
+}
+
+// ---- header actions ----
+$('#btnRotate').onclick = async () => {
+  const r = await api('/api/rotate', {method:'POST'});
+  if (r.error) alert(r.error);
+  refresh();
+};
+$('#btnNextBatch').onclick = async () => {
+  const byId = Object.fromEntries(state.containers.map(c => [c.id, c]));
+  const next = state.plan.batches.find(b => b.containers.some(c => byId[c.id]?.restartCount === 0));
+  if (!next) { alert('所有重启批次已执行'); return; }
+  const r = await api('/api/restart-batch', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({index: next.index})});
+  if (r.error) alert(r.error);
+  refresh();
+};
+$('#btnReport').onclick = async () => { report = await api('/api/report'); tab='report';
+  document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('active', x.dataset.tab==='report'));
+  renderTab(); };
+
+refresh();
+setInterval(() => { if ($('#autoRefresh').checked) refresh(); }, 1000);
+</script>
+</body>
+</html>
